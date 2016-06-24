@@ -47,6 +47,7 @@ import org.apache.synapse.ManagedLifecycle;
 import org.apache.synapse.MessageContext;
 import org.apache.synapse.SynapseException;
 import org.apache.synapse.SynapseLog;
+import org.apache.synapse.commons.json.JsonUtil;
 import org.apache.synapse.continuation.ContinuationStackManager;
 import org.apache.synapse.core.SynapseEnvironment;
 import org.apache.synapse.core.axis2.Axis2MessageContext;
@@ -89,7 +90,8 @@ public class CacheMediator extends AbstractMediator implements ManagedLifecycle,
     private String onCacheHitRef = null;
     private int maxMessageSize = 0;
     private static final String CACHE_KEY_PREFIX = "synapse.cache_key_";
-
+    private static final String JSON_PAYLOAD_KEY = "json-payload.cache_key";
+    
     private String cacheKey = "synapse.cache_key";
 
     public void init(SynapseEnvironment se) {
@@ -258,6 +260,23 @@ public class CacheMediator extends AbstractMediator implements ManagedLifecycle,
                     headerProperties.put(Constants.Configuration.MESSAGE_TYPE, messageType);
                     response.setHeaderProperties(headerProperties);
                     }
+                
+                /**
+                 * This is to store JSON message as a string in CachableResponse
+                 */
+                if (JsonUtil.hasAJsonPayload(msgCtx)) {
+                    String jsonString = JsonUtil.jsonPayloadToString(msgCtx);
+                    Map<String, Object> headerProperties = response.getHeaderProperties();
+
+                    // If not doingREST, headerProperties Map is empty. Therefore need to create a new Map instance
+                    if(headerProperties == null){
+                        response.setHeaderProperties(new HashMap<String, Object>());
+                        headerProperties = response.getHeaderProperties();
+                    }
+
+                    headerProperties.put(JSON_PAYLOAD_KEY, jsonString);
+                }
+
             } catch (XMLStreamException e) {
                 handleException("Unable to set the response to the Cache", e, synCtx);
             }
@@ -412,6 +431,17 @@ public class CacheMediator extends AbstractMediator implements ManagedLifecycle,
                             }
                             msgCtx.getEnvelope().getBody().addChild(response.getFirstElement().getFirstElement());
                         }
+                        
+                        /**
+                        * If JSON Payload has been stored in cachedResponse, use that to create message payload
+                        */
+                        if ((cachedResponse.getHeaderProperties() != null)
+                            && (cachedResponse.getHeaderProperties().get(JSON_PAYLOAD_KEY)!=null)) {
+
+                            String jsonString = (String) cachedResponse.getHeaderProperties().get(JSON_PAYLOAD_KEY);
+                            JsonUtil.newJsonPayload(msgCtx, jsonString, true, true);
+                        }
+
                     } catch (Exception ex) {
                         handleException("Error setting response envelope from cache : "
                                 + cacheKey, synCtx);
